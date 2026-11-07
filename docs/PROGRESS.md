@@ -10,7 +10,7 @@
 | API GET | Selesai | `GET /articles`: keyset cursor base64 URL-safe mikrodetik, limit 1--100, author/name search, dan error 400. Diverifikasi dengan curl pada 8 November 2026. |
 | Pengaman dasar | Selesai | Timeout per request, `ReadHeaderTimeout`, `statement_timeout=3000`, logging error internal, dan custom plan. |
 | Test | Selesai | Unit `TestCursorRoundTripAndInvalidValues`, `TestCreateValidation`, dan `TestListLimitValidation`; integrasi `TestIntegrationI1KeysetNoDuplicateOrMissing` sampai `I6PoolRuntimeSettings`. `make test` dan `go test ./... -count=1 -race` lulus pada 8 November 2026. |
-| Docker Compose untuk app | TIDAK DIKETAHUI | Tidak dikerjakan pada Langkah 2. |
+| Docker Compose untuk app | Selesai | `docker compose --env-file /dev/null config` valid pada 8 November 2026; app+db jalan pada clone bersih tanpa `.env`. |
 | README | TIDAK DIKETAHUI | Belum diverifikasi pada Langkah 1. |
 | Disclosure AI | Terverifikasi | `docs/ai-usage.md` ada; bagian "Satu kegagalan AI" masih berupa teks petunjuk kosong. |
 
@@ -56,6 +56,39 @@
   dan `git diff -- internal/postgres/repository.go` kosong sebelum test akhir.
 - Count `articles` database produksi dibaca sebelum dan sesudah test: keduanya
   `1000000`; test hanya menulis ke `articles_test`.
+
+## Langkah 4 (runnable dari clone bersih)
+
+- Ditambahkan `Dockerfile` multi-stage untuk `cmd/api` dengan basis builder
+  `golang:1.26-alpine` sesuai `go.mod`, image akhir
+  `gcr.io/distroless/static-debian12:nonroot`, dan proses jalan sebagai non-root.
+- Ditambahkan `.dockerignore` berisi `.env`, `seed.log`, `.git`, `docs`, dan `bin`.
+- `docker-compose.yml` diperbarui: service `app` ditambahkan, `depends_on` ke
+  `db` memakai `condition: service_healthy`, port app host default `8080`,
+  `DATABASE_URL`/`DB_MAX_CONNS`/`REQUEST_TIMEOUT` diberi default, dan
+  `container_name` pada `db` dihapus.
+- Semua variabel `db` memakai default `${VAR:-nilai}` agar compose valid tanpa
+  `.env`; verifikasi `env -u ... docker compose --env-file /dev/null config`
+  berhasil pada 8 November 2026.
+- Inisialisasi database baru otomatis dipasang hanya dari file up migration:
+  `01_create_tables.up.sql`, `02_create_indexes.up.sql`, dan
+  `03_sample_data.sql` (read-only).
+- Ditambahkan `scripts/sample_data.sql` berisi 3 author (`201`/`202` sama-sama
+  bernama Budi, `203` bernama Sari) dan 4 artikel contoh.
+- `Makefile` diperbarui: `-include .env`, default `?=` untuk
+  `POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB/POSTGRES_PORT` (serta default
+  runtime app), dan target baru `app` (`docker compose up -d --build`).
+- Uji clone bersih di `/tmp/article-clone` (tanpa `.env`):
+  `POSTGRES_PORT=5440 APP_PORT=18081 docker compose -p articleclone up -d --build`
+  berhasil; `docker compose -p articleclone ps` menunjukkan `db` healthy.
+- Verifikasi endpoint clone bersih via curl:
+  `GET /articles?limit=2` -> 200 (berisi data contoh),
+  `GET /articles?author=budi` -> 200 (memuat artikel author `201` dan `202`),
+  `POST /articles` dengan `author_id=201` -> 201,
+  `POST /articles` dengan `author_id` tidak ada -> 422.
+- Stack uji ditutup dengan `docker compose -p articleclone down` (tanpa `-v`).
+  Repo asli tetap jalan (`docker compose ps` menampilkan `article-db` healthy),
+  dan query `SELECT count(*) FROM articles;` di database asli tetap `1000000`.
 
 ## Langkah berikutnya
 

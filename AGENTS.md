@@ -28,3 +28,15 @@ menerapkan migrasi, lalu menjalankan `go test ./... -v -count=1` dengan
 `TEST_DATABASE_URL`. Target ini tidak menggunakan database `articles`.
 Untuk race detector, sumber `.env` lalu jalankan `go test ./... -count=1 -race`
 dengan `TEST_DATABASE_URL` yang menunjuk ke `articles_test`.
+
+## Menjalankan service dari clone bersih
+
+`docker-compose.yml` sudah punya nilai default untuk service `db` dan `app`,
+jadi bisa jalan tanpa file `.env`.
+
+1. Jalankan stack:
+	`docker compose up -d --build`
+2. Atur port terpisah bila perlu:
+	`POSTGRES_PORT=5440 APP_PORT=18081 docker compose -p articleclone up -d --build`
+3. Untuk menghentikan stack uji, gunakan tanpa hapus volume:
+	`docker compose -p articleclone down`
