@@ -91,8 +91,29 @@ dengan `BitmapAnd`; karena itu node utama berubah.
 
 ## Temuan
 
+### Pengukuran API tambahan (8 November 2026)
+
+Pengukuran berikut dijalankan dengan `make psql`, memakai literal, halaman
+pertama, dan `LIMIT 21`. Masing-masing kasus dijalankan dua kali.
+
+| Kasus | Node utama dan index | Baris | Eksekusi 1 (ms) | Eksekusi 2 (ms) |
+|---|---|---:|---:|---:|
+| author-giant, `zzxqv` | Sort → Bitmap Heap Scan; `idx_articles_search` | 0 | 0.678 | 0.018 |
+| author-giant, `hidrokarbon` | Sort → Bitmap Heap Scan; `idx_articles_search` | 4 | 0.062 | 0.030 |
+
+Prepared statement `author-giant` + `kebijakan` memakai `Index Scan using
+idx_articles_created` pada eksekusi pertama (2.768 ms). Tanpa pengaturan plan
+cache, eksekusi ke-6 dan ke-7 berubah ke `Sort → Bitmap Heap Scan` dengan
+`BitmapAnd`; waktu eksekusi ke-7 adalah 77.426 ms (ke-6 94.358 ms). Setelah
+`SET plan_cache_mode = force_custom_plan`, eksekusi pertama (1.840 ms) dan
+ke-7 (2.223 ms) sama-sama memakai `Index Scan using idx_articles_created`.
+
 Tidak ada `Seq Scan`, node `Sort` dengan lebih dari 10.000 baris, atau
 `Execution Time` di atas 300 ms pada enam kasus matriks halaman pertama.
+
+Pengukuran prepared statement di atas berubah plan pada eksekusi ke-6 dan
+ke-7. Karena itu API mengatur `plan_cache_mode=force_custom_plan`; kesimpulan
+ini hanya berlaku untuk data, statistik, dan parameter yang diukur.
 
 ## Catatan
 

@@ -2,29 +2,90 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pratamaze/article-service/internal/article"
+	"github.com/pratamaze/article-service/internal/httpapi"
+	"github.com/pratamaze/article-service/internal/postgres"
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	logger := slog.Default()
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		logger.Error("DATABASE_URL wajib diisi")
+		os.Exit(1)
+	}
+	maxConns, err := envPositiveInt("DB_MAX_CONNS", 20)
 	if err != nil {
-		slog.Error("gagal membuat pool", "err", err)
+		logger.Error("konfigurasi DB_MAX_CONNS tidak valid", "err", err)
+		os.Exit(1)
+	}
+	timeout, err := envPositiveDuration("REQUEST_TIMEOUT", 5*time.Second)
+	if err != nil {
+		logger.Error("konfigurasi REQUEST_TIMEOUT tidak valid", "err", err)
+		os.Exit(1)
+	}
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		logger.Error("DATABASE_URL tidak valid", "err", err)
+		os.Exit(1)
+	}
+	poolConfig.MaxConns = int32(maxConns)
+	poolConfig.ConnConfig.RuntimeParams["statement_timeout"] = "3000"
+	// The prepared-plan test changed at execution seven; custom plans retain actual parameter selectivity.
+	poolConfig.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		logger.Error("gagal membuat pool", "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-
-	var version string
-	if err := pool.QueryRow(ctx, "SELECT version()").Scan(&version); err != nil {
-		slog.Error("gagal query", "err", err)
+	if err := pool.Ping(ctx); err != nil {
+		logger.Error("gagal menghubungi database", "err", err)
 		os.Exit(1)
 	}
-	fmt.Println("terhubung:", version)
+
+	server := &http.Server{
+		Addr:              ":" + envOrDefault("PORT", "8080"),
+		Handler:           httpapi.NewHandler(article.NewService(postgres.NewRepository(pool)), timeout, logger).Routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	logger.Info("API berjalan", "addr", server.Addr)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server berhenti", "err", err)
+		os.Exit(1)
+	}
+}
+
+func envOrDefault(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envPositiveInt(name string, fallback int) (int, error) {
+	parsed, err := strconv.Atoi(envOrDefault(name, strconv.Itoa(fallback)))
+	if err != nil || parsed < 1 {
+		return 0, errors.New("harus bilangan bulat positif")
+	}
+	return parsed, nil
+}
+
+func envPositiveDuration(name string, fallback time.Duration) (time.Duration, error) {
+	parsed, err := time.ParseDuration(envOrDefault(name, fallback.String()))
+	if err != nil || parsed <= 0 {
+		return 0, errors.New("harus durasi positif, misalnya 5s")
+	}
+	return parsed, nil
 }
