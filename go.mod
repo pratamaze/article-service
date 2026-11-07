@@ -2,7 +2,10 @@ module github.com/pratamaze/article-service
 
 go 1.26.0
 
-require github.com/jackc/pgx/v5 v5.12.0
+require (
+	github.com/jackc/pgx/v5 v5.12.0
+	github.com/oklog/ulid/v2 v2.1.2
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
