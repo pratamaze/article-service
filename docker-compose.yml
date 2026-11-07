@@ -1,21 +1,38 @@
 services:
   db:
     image: postgres:16
-    container_name: article-db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-articles}
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./migrations/0001_create_tables.up.sql:/docker-entrypoint-initdb.d/01_create_tables.up.sql:ro
+      - ./migrations/0002_create_indexes.up.sql:/docker-entrypoint-initdb.d/02_create_indexes.up.sql:ro
+      - ./scripts/sample_data.sql:/docker-entrypoint-initdb.d/03_sample_data.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-articles}"]
       interval: 5s
       timeout: 3s
       retries: 10
     shm_size: 256mb
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_dev_password}@db:5432/${POSTGRES_DB:-articles}?sslmode=disable
+      PORT: "8080"
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-20}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-5s}
+    ports:
+      - "${APP_PORT:-8080}:8080"
 
 volumes:
   pgdata:

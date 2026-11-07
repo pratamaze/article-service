@@ -1,13 +1,25 @@
-include .env
+-include .env
+
+POSTGRES_USER ?= app
+POSTGRES_PASSWORD ?= app_dev_password
+POSTGRES_DB ?= articles
+POSTGRES_PORT ?= 5433
+APP_PORT ?= 8080
+DB_MAX_CONNS ?= 20
+REQUEST_TIMEOUT ?= 5s
+
 export
 
 PSQL = docker compose exec -T db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -v ON_ERROR_STOP=1
 
-# .PHONY: up down psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
-.PHONY: up down psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
+# .PHONY: up down app psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
+.PHONY: up down app psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
 
 up:
 	docker compose up -d
+
+app:
+	docker compose up -d --build
 
 down:
 	docker compose down

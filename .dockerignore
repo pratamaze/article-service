@@ -1,0 +1,5 @@
+.env
+seed.log
+.git
+docs
+bin
