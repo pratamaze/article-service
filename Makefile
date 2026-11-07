@@ -3,8 +3,8 @@ export
 
 PSQL = docker compose exec -T db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -v ON_ERROR_STOP=1
 
-# .PHONY: up down psql run test
-.PHONY: up down psql run test migrate-up migrate-down indexes-up indexes-down sanity seed stats
+# .PHONY: up down psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
+.PHONY: up down psql run test test-db migrate-up migrate-down indexes-up indexes-down sanity seed stats
 
 up:
 	docker compose up -d
@@ -18,8 +18,12 @@ psql:
 run:
 	go run ./cmd/api
 
-test:
-	go test ./...
+test-db:
+	@docker compose exec -T db psql -U $(POSTGRES_USER) -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS articles_test WITH (FORCE)" -c "CREATE DATABASE articles_test"
+	@for f in $$(ls migrations/*.up.sql | sort); do echo "-> $$f"; docker compose exec -T db psql -U $(POSTGRES_USER) -d articles_test -v ON_ERROR_STOP=1 -f - < $$f || exit 1; done
+
+test: test-db
+	@TEST_DATABASE_URL="postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/articles_test?sslmode=disable" go test ./... -v -count=1
 
 migrate-up:
 	@for f in $$(ls migrations/*.up.sql | sort); do echo "-> $$f"; $(PSQL) < $$f || exit 1; done

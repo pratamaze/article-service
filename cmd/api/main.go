@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pratamaze/article-service/internal/article"
 	"github.com/pratamaze/article-service/internal/httpapi"
 	"github.com/pratamaze/article-service/internal/postgres"
@@ -32,19 +31,9 @@ func main() {
 		logger.Error("konfigurasi REQUEST_TIMEOUT tidak valid", "err", err)
 		os.Exit(1)
 	}
-	poolConfig, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		logger.Error("DATABASE_URL tidak valid", "err", err)
-		os.Exit(1)
-	}
-	poolConfig.MaxConns = int32(maxConns)
-	poolConfig.ConnConfig.RuntimeParams["statement_timeout"] = "3000"
-	// The prepared-plan test changed at execution seven; custom plans retain actual parameter selectivity.
-	poolConfig.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
-
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	pool, err := postgres.NewPool(ctx, databaseURL, int32(maxConns))
 	if err != nil {
 		logger.Error("gagal membuat pool", "err", err)
 		os.Exit(1)

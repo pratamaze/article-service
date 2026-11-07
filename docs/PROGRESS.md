@@ -9,7 +9,7 @@
 | API POST | Selesai | `POST /articles`: batas body 1 MB, validasi rune, ULID server, dan pemetaan 400/422. Diverifikasi dengan curl pada 8 November 2026. |
 | API GET | Selesai | `GET /articles`: keyset cursor base64 URL-safe mikrodetik, limit 1--100, author/name search, dan error 400. Diverifikasi dengan curl pada 8 November 2026. |
 | Pengaman dasar | Selesai | Timeout per request, `ReadHeaderTimeout`, `statement_timeout=3000`, logging error internal, dan custom plan. |
-| Test | sebagian (smoke test repository) | `internal/postgres/repository_test.go` menguji pagination, `syndication`, dan author ambigu; `go test ./... -v` lulus dengan `DATABASE_URL` dari `.env`, dan test dilewati bila variabel kosong. |
+| Test | Selesai | Unit `TestCursorRoundTripAndInvalidValues`, `TestCreateValidation`, dan `TestListLimitValidation`; integrasi `TestIntegrationI1KeysetNoDuplicateOrMissing` sampai `I6PoolRuntimeSettings`. `make test` dan `go test ./... -count=1 -race` lulus pada 8 November 2026. |
 | Docker Compose untuk app | TIDAK DIKETAHUI | Tidak dikerjakan pada Langkah 2. |
 | README | TIDAK DIKETAHUI | Belum diverifikasi pada Langkah 1. |
 | Disclosure AI | Terverifikasi | `docs/ai-usage.md` ada; bagian "Satu kegagalan AI" masih berupa teks petunjuk kosong. |
@@ -40,6 +40,23 @@
   limit 1000, dan author+author_id memberi 400. Query `berita` dan query kosong
   yang dipangkas memberi 200.
 
+## Langkah 3 (test otomatis)
+
+- `make test` membuat ulang database terpisah `articles_test`, menerapkan dua
+  migrasi up, lalu menjalankan `go test ./... -v -count=1` dengan
+  `TEST_DATABASE_URL`. I1--I6 lulus tanpa skip pada 8 November 2026.
+- Test unit mencakup cursor mikrodetik dan nilai rusak, batas validasi POST
+  berbasis rune, serta default/batas limit. Test HTTP-integrasi mencakup keyset
+  55 artikel (50 timestamp sama), nama author/ambigu, normalisasi, edit dan
+  search vector, input rusak, serta runtime parameter pool.
+- Refactor minimum: `postgres.NewPool` dipindahkan ke `internal/postgres/pool.go`
+  dan dipakai oleh `main.go`, sehingga I6 memeriksa factory yang sama dengan API.
+- `go test ./... -count=1 -race` lulus. Sanity check I1 dengan `id DESC`
+  sementara dihapus gagal (`got 95 ids, want 226`); `repository.go` dipulihkan
+  dan `git diff -- internal/postgres/repository.go` kosong sebelum test akhir.
+- Count `articles` database produksi dibaca sebelum dan sesudah test: keduanya
+  `1000000`; test hanya menulis ke `articles_test`.
+
 ## Langkah berikutnya
 
-TIDAK DIKETAHUI; brief Langkah 2 melarang fitur lain.
+TIDAK DIKETAHUI.

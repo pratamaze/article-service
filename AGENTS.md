@@ -20,3 +20,11 @@ API membaca `DATABASE_URL` (wajib), `DB_MAX_CONNS` (default 20), dan
 dan `plan_cache_mode=force_custom_plan`: pengukuran prepared statement pada 8
 November 2026 berubah ke generic plan pada eksekusi ke-6 dan ke-7, sedangkan
 custom plan tetap memakai plan parameter aktual.
+
+## Menjalankan test
+
+Jalankan `make test` untuk membuat ulang database terpisah `articles_test`,
+menerapkan migrasi, lalu menjalankan `go test ./... -v -count=1` dengan
+`TEST_DATABASE_URL`. Target ini tidak menggunakan database `articles`.
+Untuk race detector, sumber `.env` lalu jalankan `go test ./... -count=1 -race`
+dengan `TEST_DATABASE_URL` yang menunjuk ke `articles_test`.
