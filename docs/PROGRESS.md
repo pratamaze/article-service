@@ -11,7 +11,7 @@
 | Pool dan timeout | Terverifikasi | `internal/postgres/pool.go` mengatur `MaxConns`, `statement_timeout=3000`, dan `plan_cache_mode=force_custom_plan`; `TestIntegrationI6PoolRuntimeSettings` PASS. |
 | Test | Terverifikasi | `go build ./...`, `go vet ./...`, dan `make test` lulus; semua test yang dijalankan PASS. |
 | Docker Compose app | Terverifikasi | `Dockerfile` ada; `docker-compose.yml` memiliki `app`; `docker compose --env-file /dev/null config` valid. |
-| Clone bersih | TIDAK DIKETAHUI | Tidak diuji dalam audit ini. |
+| Clone bersih | Terverifikasi | Clone sementara tanpa `.env` berhasil dibangun dan dijalankan terisolasi sebagai project `articleclone` pada port 5440/18081. GET list dan filter `author=budi` memberi 200; POST author `201` memberi 201 dan author tidak ada memberi 422; `go build ./...` lulus. |
 | Evidence | Terverifikasi | `docs/evidence.md` ada, berisi EXPLAIN list dan raw output. |
 | Load test | Tidak ada bukti | Pencarian `k6`, `vegeta`, `hey`, `load test`, dan `stress` di repo tidak menghasilkan skrip atau hasil. |
 | README | Terverifikasi | `README.md` ada dan memuat struktur folder, cara menjalankan layanan/test, data simulasi, dan tautan dokumentasi. |
@@ -42,6 +42,8 @@
 ## Hasil perintah audit
 
 - `git status --short` tidak menghasilkan perubahan sebelum pembaruan file ini.
+- Verifikasi clone bersih (8 November 2026): `POSTGRES_PORT=5440 APP_PORT=18081 docker compose -p articleclone up -d --build` berhasil; `db` berstatus healthy. `GET /articles?limit=2` memberi 200 dan data contoh, sedangkan `GET /articles?author=budi` memberi 200 dengan author_id `201` dan `202`. POST valid memakai author `201` memberi 201; POST dengan `author_id` tidak ada memberi 422. `go build ./...` di clone lulus. Project uji dihentikan memakai `docker compose -p articleclone down` tanpa `-v`, lalu clone sementara dihapus.
+- Setelah uji clone, `docker compose ps` di repo asli menunjukkan `article-db` tetap healthy, dan `SELECT count(*) FROM articles` menghasilkan `1000000`.
 - `make test` hanya menjalankan `DROP DATABASE IF EXISTS articles_test WITH (FORCE)`,
   `CREATE DATABASE articles_test`, migrasi up ke `articles_test`, lalu test.
 - Test PASS: `TestCursorRoundTripAndInvalidValues`, `TestCreateValidation`,
