@@ -153,6 +153,20 @@ Kasus Budi hangat 0.143 ms, tidak lebih buruk dari angka sebelum perbaikan
 0.239 ms. Pengukuran API lokal untuk `GET /articles?author=Syndication&limit=20`
 memberi HTTP 200 dalam 15.399 ms lalu 1.113 ms.
 
+### Perbandingan kata jarang: bentuk lama vs LATERAL
+
+Pada 8 November 2026, bentuk lama `author_id = ANY(ARRAY['author-000001',
+'author-giant'])` diukur dua kali dengan `LIMIT 21`. Untuk `hidrokarbon`, ia
+memakai `Sort → Bitmap Heap Scan` dengan indeks `idx_articles_search`, memberi
+4 baris dalam 7.208 ms lalu 1.071 ms (6 baris dibuang oleh filter). Untuk
+`zzxqv`, plan yang sama memberi 0 baris dalam 1.405 ms lalu 0.949 ms; tidak
+ada baris yang dibuang karena bitmap index scan memberi 0 baris. Bentuk
+LATERAL repository untuk `zzxqv` memindai `idx_articles_author_created`; saat
+diisolasi ke `author-giant`, node `Index Scan` melaporkan `Rows Removed by
+Filter: 300441`, 0 hasil, dan 251.753 ms. Pada LATERAL dua author sekaligus,
+node tersebut ber-loop dua kali dan EXPLAIN melaporkan rata-rata 150238 baris
+terbuang per loop. Ini adalah hasil pengukuran, bukan perubahan kode.
+
 ## Generic plan (opsional)
 
 Untuk statement kasus 3 yang diprepare dengan parameter `$1` untuk author,
@@ -391,7 +405,24 @@ Execution Time: 0.046 ms
 
 ## 2. Concurrency
 
-TODO: bukti belum dibuat.
+`internal/postgres/pool.go` mengatur `MaxConns` dari `DB_MAX_CONNS`,
+`statement_timeout=3000`, dan `plan_cache_mode=force_custom_plan`.
+`docker compose config` saat pengukuran memberi `DB_MAX_CONNS=20` dan
+`REQUEST_TIMEOUT=5s`. Runner `cmd/loadtest` hanya mengirim GET dan memakai
+library standar Go; pemeriksaan `which` tidak menemukan `hey`, `k6`, atau
+`vegeta`. Pengujian dilakukan pada 8 November 2026 terhadap 1 juta baris di
+satu mesin lokal; cache TIDAK dibangun (pengembangan lanjut).
+
+| Skenario | Worker/durasi | Total | RPS | 200 / 400 / 503 / 500 / error koneksi | p50 | p95 | p99 | Koneksi maksimum |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Burst campuran: 60% halaman pertama, 20% Syndication, 10% `kebijakan`, 10% Budi Santoso | 200 / 20 dtk | 164639 | 8231.95 | 164639 / 0 / 0 / 0 / 0 | 20.163142 ms | 39.699694 ms | 45.060846 ms | 21 |
+| Terberat: Syndication + `zzxqv` | 50 / 10 dtk | 410 | 41.00 | 410 / 0 / 0 / 0 / 0 | 1.102444604 dtk | 1.627276657 dtk | 2.076260781 dtk | 21 |
+
+Sampel `pg_stat_activity` tiap dua detik menunjukkan maksimum 21 koneksi pada
+kedua skenario. Angka ini satu di atas `DB_MAX_CONNS=20` karena query sampler
+`psql` sendiri juga terhubung ke database; pengukuran ini tidak memisahkan
+koneksi sampler dari koneksi aplikasi. Tidak ada HTTP 400, 503, 500, atau error
+koneksi pada dua run tersebut.
 
 ## 3. Search & Filtering
 
@@ -424,4 +455,10 @@ dibuktikan oleh I7, bukan kegagalan test.
 
 ## 4. Extensibility & Maintainability
 
-TODO: bukti belum dibuat.
+- `internal/httpapi` menangani HTTP dan meneruskan input ke `internal/article`.
+- `internal/article` memuat service, tipe domain, validasi, dan aturan bisnis.
+- `internal/postgres` mengimplementasikan repository PostgreSQL untuk service.
+- Skema saat ini memisahkan `authors` dan `articles`, dengan FK `articles.author_id` ke `authors(id)`.
+- Categories atau comments dapat ditambah lewat migrasi bernomor baru dan paket baru di `internal/`.
+- Tabel fitur baru seharusnya memakai FK ke `articles(id)` tanpa mengubah kode artikel yang ada.
+- Aturan bisnis fitur tersebut diletakkan pada service paket domainnya; handler dan repository menjadi batas HTTP dan penyimpanan.

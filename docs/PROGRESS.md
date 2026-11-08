@@ -1,5 +1,16 @@
 # Progress assessment
 
+## Langkah 4 — pemeriksaan kecil, load test, dan extensibility (8 November 2026)
+
+| Item | Status | Bukti |
+|---|---|---|
+| Distribusi `author-giant` | Terverifikasi | Dari 1.000 artikel terbaru ada 0 `author-giant`; pada offset 400.000--400.999 juga 0. |
+| Kata jarang: bentuk lama vs LATERAL | Terverifikasi | Bentuk lama `ANY(...)` untuk `hidrokarbon` selesai 7.208/1.071 ms dan `zzxqv` 1.405/0.949 ms; LATERAL terisolasi `author-giant` untuk `zzxqv` membuang 300441 baris dan selesai 251.753 ms. |
+| Load test GET-only | Terverifikasi | `cmd/loadtest` (standard library) menjalankan burst 200 worker/20 dtk: 164639 request, 8231.95 RPS, seluruhnya 200; heavy 50 worker/10 dtk: 410 request, 41.00 RPS, seluruhnya 200. |
+| Pool dan koneksi | Terverifikasi | Compose memakai `DB_MAX_CONNS=20` dan `REQUEST_TIMEOUT=5s`; puncak `pg_stat_activity` 21 pada kedua run, termasuk koneksi sampler `psql`. |
+| Data dan lifecycle app | Terverifikasi | `articles` berjumlah 1000000 sebelum dan sesudah; app dihentikan dengan `docker compose stop app`, tanpa menghapus volume. |
+| Extensibility | Terdokumentasi | `docs/evidence.md` menguraikan batas handler/service/repository serta jalur migrasi dan paket baru untuk fitur ber-FK ke `articles(id)`. |
+
 ## Langkah 3b — multi-author Syndication (8 November 2026)
 
 | Item | Status | Bukti |
