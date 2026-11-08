@@ -8,6 +8,94 @@ filter, keyset cursor, urutan, dan `LIMIT`. Statement diprepare agar placeholder
 (limit klien 20 ditambah satu untuk `has_more`). Tidak ada perubahan data dan
 tidak menggunakan `SET enable_seqscan = off`.
 
+## Bentuk data uji saat ini
+
+Pengukuran bagian ini dilakukan pada 8 November 2026. Semua query terhadap database `articles` adalah `SELECT`; jumlah artikel sebelum dan setelah pengukuran serta seed terisolasi adalah 1.000.000. `min(created_at)` adalah `2022-03-02 18:43:20.37845+00` dan `max(created_at)` adalah `2026-11-07 18:42:24.621674+00`.
+
+Tabel berikut berasal dari `width_bucket(extract(epoch FROM created_at), lo, hi, 10)`, dengan `lo` dan `hi` adalah minimum serta maksimum waktu pada `articles`. Bucket 11 berisi tepat satu baris yang sama dengan batas atas; ini adalah perilaku `width_bucket`, bukan kelompok waktu tambahan yang dirancang oleh seed.
+
+| Bucket | Semua artikel | `author-giant` |
+|---:|---:|---:|
+| 1 | 205583 | 205583 |
+| 2 | 94858 | 94858 |
+| 3--8 | 0 | 0 |
+| 9 | 220936 | 0 |
+| 10 | 478622 | 0 |
+| 11 (batas atas) | 1 | 0 |
+
+Distribusi per bulan yang benar-benar ada pada hasil query adalah berikut. Nilai nol `author-giant` pada bulan 2026 ditulis eksplisit agar bentuk data tidak tersamarkan oleh `GROUP BY`.
+
+| Bulan | Semua artikel | `author-giant` |
+|---|---:|---:|
+| 2022-03 | 35073 | 35073 |
+| 2022-04 | 36067 | 36067 |
+| 2022-05 | 37052 | 37052 |
+| 2022-06 | 36261 | 36261 |
+| 2022-07 | 37235 | 37235 |
+| 2022-08 | 37116 | 37116 |
+| 2022-09 | 36219 | 36219 |
+| 2022-10 | 37214 | 37214 |
+| 2022-11 | 8204 | 8204 |
+| 2026-03 | 81808 | 0 |
+| 2026-04 | 83933 | 0 |
+| 2026-05 | 86949 | 0 |
+| 2026-06 | 83738 | 0 |
+| 2026-07 | 86765 | 0 |
+| 2026-08 | 86884 | 0 |
+| 2026-09 | 83781 | 0 |
+| 2026-10 | 86786 | 0 |
+| 2026-11 | 18915 | 0 |
+
+Pemeriksaan `git diff b0763ae 923e1ba -M --stat -- cmd/seed scripts/seed` menunjukkan perpindahan `scripts/seed/main.go` ke `cmd/seed/main.go` tanpa perubahan baris. Kode seed membuat `created_at` menaik dari waktu mulai hingga rentang 250 hari, dengan jitter dan 5% kemungkinan memakai waktu baris sebelumnya. Untuk setiap artikel, `author-giant` dipilih secara acak independen dengan peluang 30%; selain itu salah satu author ekor dipilih acak.
+
+Seed dijalankan hanya pada `articles_test` yang dibuat ulang melalui `make test-db`, dengan `DATABASE_URL` database tersebut dan `go run ./cmd/seed -n 20000 -seed 42` (tanpa `-reset`). Hasilnya 20.000 artikel dan distribusi giant berikut; bucket 11 kembali hanya baris batas atas.
+
+| Bucket | Semua artikel test | `author-giant` test |
+|---:|---:|---:|
+| 1 | 2000 | 616 |
+| 2 | 2001 | 578 |
+| 3 | 2000 | 602 |
+| 4 | 1999 | 580 |
+| 5 | 2001 | 592 |
+| 6 | 1999 | 578 |
+| 7 | 2000 | 623 |
+| 8 | 2000 | 633 |
+| 9 | 2000 | 616 |
+| 10 | 1999 | 615 |
+| 11 (batas atas) | 1 | 0 |
+
+Jadi, seed saat ini menghasilkan `author-giant` yang tersebar sepanjang waktu (pada seed ini ada di bucket 1--10), sedangkan data `articles` saat ini terkonsentrasi pada waktu paling lama (bucket 1--2). Kapan atau mengapa bentuk data `articles` berubah: **TIDAK DIKETAHUI**.
+
+## Matriks ukur pada data saat ini
+
+SQL setiap kasus persis cabang halaman pertama `Repository.ListArticles`: `SELECT id, author_id, title, left(body, 200), created_at FROM articles`, filter yang sesuai, `ORDER BY created_at DESC, id DESC`, dan `LIMIT 21`. Setiap literal dijalankan dua kali memakai `EXPLAIN (ANALYZE, BUFFERS)`.
+
+| Kasus | Node utama | Index | Jumlah baris | Waktu pertama (ms) | Waktu kedua (ms) |
+|---|---|---|---:|---:|---:|
+| `author-giant`, tanpa query | Index Scan | `idx_articles_author_created` | 21 | 0.161 | 0.055 |
+| `author-giant`, `kebijakan` | Index Scan | `idx_articles_author_created` | 21 | 4.219 | 0.913 |
+| `author-giant`, `berita` | Index Scan | `idx_articles_author_created` | 21 | 0.077 | 0.061 |
+| `author-giant`, `zzxqv` | Sort → Bitmap Heap Scan | `idx_articles_search` | 0 | 6.266 | 0.975 |
+| `author-000100`, tanpa query | Index Scan | `idx_articles_author_created` | 21 | 0.623 | 0.060 |
+| `author-000100`, `kebijakan` | Index Scan | `idx_articles_author_created` | 0 | 0.099 | 0.036 |
+| tanpa author, `berita` | Index Scan | `idx_articles_created` | 21 | 0.122 | 0.052 |
+| tanpa author, tanpa query | Index Scan | `idx_articles_created` | 21 | 0.041 | 0.036 |
+
+### Prepared statement kasus `author-giant` + `kebijakan` pada data saat ini
+
+Statement berparameter untuk kasus kedua dijalankan tujuh kali tanpa pengaturan khusus (`RESET plan_cache_mode`), kemudian tujuh kali lagi dengan `SET plan_cache_mode = force_custom_plan`. Kedua bentuk memakai `LIMIT 21`.
+
+| Pengaturan | Eksekusi 1: node / index / baris | Waktu 1 (ms) | Eksekusi 7: node / index / baris | Waktu 7 (ms) |
+|---|---|---:|---|---:|
+| default | Index Scan / `idx_articles_author_created` / 21 | 1.551 | Index Scan / `idx_articles_author_created` / 21 | 2.490 |
+| `force_custom_plan` | Index Scan / `idx_articles_author_created` / 21 | 0.531 | Index Scan / `idx_articles_author_created` / 21 | 0.509 |
+
+Pada default, estimate pada node `Index Scan` berubah dari 3496 baris pada eksekusi 1 menjadi 1 baris pada eksekusi 6 dan 7; node dan index tidak berubah. Dengan `force_custom_plan`, estimate tetap 3496 pada eksekusi 1--7. Tidak ada `Seq Scan` maupun waktu di atas 300 ms dalam delapan kasus dan pemeriksaan ini.
+
+## Arsip pengukuran pada distribusi data sebelumnya
+
+Seluruh tabel dan raw output setelah heading ini diukur pada distribusi data sebelumnya; **tidak berlaku untuk data saat ini**. Angka dipertahankan sebagai arsip dan tidak dipakai sebagai pembanding dengan matriks aktual di atas.
+
 ## Pengukuran awal (dengan cursor)
 
 ### Tanpa filter
@@ -63,7 +151,7 @@ diterapkan pada heap scan, lalu hasil diurutkan. Hasilnya 4 baris, 0.088 ms,
 dan 14 shared-buffer hits. Untuk kombinasi ini PostgreSQL memilih index
 full-text, bukan `idx_articles_author_created`, berdasarkan parameter aktual.
 
-## Matriks ukur (halaman pertama)
+## Matriks ukur lama (halaman pertama; distribusi data sebelumnya)
 
 Setiap statement memakai SQL `ListArticles` halaman pertama dengan nilai literal
 dan `LIMIT 21`. Waktu dingin adalah eksekusi pertama dan waktu hangat adalah
@@ -167,14 +255,14 @@ Filter: 300441`, 0 hasil, dan 251.753 ms. Pada LATERAL dua author sekaligus,
 node tersebut ber-loop dua kali dan EXPLAIN melaporkan rata-rata 150238 baris
 terbuang per loop. Ini adalah hasil pengukuran, bukan perubahan kode.
 
-## Generic plan (opsional)
+## Generic plan lama (opsional; distribusi data sebelumnya)
 
 Untuk statement kasus 3 yang diprepare dengan parameter `$1` untuk author,
 node utama eksekusi ke-1 adalah `Index Scan using idx_articles_created`.
 Pada eksekusi ke-7 node utama berubah menjadi `Sort` di atas `Bitmap Heap Scan`
 dengan `BitmapAnd`; karena itu node utama berubah.
 
-## Temuan
+## Temuan arsip (distribusi data sebelumnya)
 
 ### Pengukuran API tambahan (8 November 2026)
 
@@ -211,7 +299,7 @@ ini hanya berlaku untuk data, statistik, dan parameter yang diukur.
 `EXPLAIN` hanya membuktikan plan pada data, statistik, dan parameter saat
 dijalankan. Angka waktu dan buffer di atas bukan jaminan performa tetap.
 
-## Raw output
+## Raw output arsip (distribusi data sebelumnya)
 
 ````text
 # Output mentah EXPLAIN halaman pertama

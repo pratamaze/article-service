@@ -1,5 +1,15 @@
 # Progress assessment
 
+## Langkah 4b — penyelarasan bukti dengan bentuk data uji (8 November 2026)
+
+| Item | Status | Bukti |
+|---|---|---|
+| Bentuk data `articles` | Terverifikasi | Count tetap 1.000.000 sebelum dan sesudah; seluruh 300441 `author-giant` berada pada bucket waktu 1--2 dan tidak ada pada bucket 9--10. Satu baris maksimum masuk bucket 11 menurut semantik `width_bucket`. |
+| Perbandingan seed | Terverifikasi | `git diff b0763ae 923e1ba -M` hanya memindahkan seed. Seed 20.000 khusus `articles_test` menyebarkan giant pada bucket 1--10 (578--633 per bucket), tidak seperti `articles`. Sebab perubahan data utama TIDAK DIKETAHUI. |
+| Matriks halaman pertama | Terverifikasi | Delapan `EXPLAIN (ANALYZE, BUFFERS)` literal memakai SQL cabang `ListArticles`, `LIMIT 21`, dua kali tiap kasus. Tidak ada `Seq Scan` atau waktu di atas 300 ms. |
+| Prepared statement | Terverifikasi | Kasus giant + `kebijakan` default mengganti estimate ke generic pada eksekusi 6--7 tetapi node/index tetap `Index Scan idx_articles_author_created`; `force_custom_plan` mempertahankan estimate custom. |
+| Dokumentasi | Diperbarui | `docs/evidence.md` menambah bentuk data, matriks aktual, dan label tegas untuk seluruh tabel/raw output distribusi sebelumnya. |
+
 ## Langkah 4 — pemeriksaan kecil, load test, dan extensibility (8 November 2026)
 
 | Item | Status | Bukti |
