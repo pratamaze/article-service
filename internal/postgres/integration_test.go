@@ -289,6 +289,61 @@ func TestIntegrationI6PoolRuntimeSettings(t *testing.T) {
 	}
 }
 
+func TestIntegrationI7MixedLanguageSearch(t *testing.T) {
+	e := newIntegrationEnv(t)
+	authorID := e.author(t, "mixed-language-search")
+	indonesian, _ := e.article(t, authorID,
+		"Pemerintah meluncurkan program banjir Jakarta",
+		"Warga di Jakarta Utara terdampak banjir sejak pagi")
+	english, _ := e.article(t, authorID,
+		"Government launches flood relief program",
+		"Residents in North Jakarta were affected by flooding since morning")
+	mixed, _ := e.article(t, authorID,
+		"Startup lokal raih funding Series A",
+		"Pemerintah meluncurkan program baru untuk startup lokal, said the minister")
+
+	// Konfigurasi simple sengaja tanpa stemming; bentuk kata berbeda bukan kecocokan.
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"banjir", []string{indonesian}},
+		{"flood", []string{english}},
+		{"startup", []string{mixed}},
+		{"program", []string{indonesian, english, mixed}},
+		{"jakarta", []string{indonesian, english}},
+		{"JAKARTA", []string{indonesian, english}},
+		{"meluncurkan", []string{indonesian, mixed}},
+		{"minister", []string{mixed}},
+		{"banjir jakarta", []string{indonesian}},
+		{"meluncur", []string{}},
+		{"launch", []string{}},
+		{"flooded", []string{}},
+		{"   ", []string{indonesian, english, mixed}},
+	} {
+		t.Run(fmt.Sprintf("query_%q", tc.query), func(t *testing.T) {
+			path := "?author_id=" + url.QueryEscape(authorID) + "&query=" + url.QueryEscape(tc.query)
+			assertExactIDs(t, ids(e.get(t, path).Items), tc.want)
+		})
+	}
+}
+
+func assertExactIDs(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	seen := make(map[string]bool, len(got))
+	for _, id := range got {
+		seen[id] = true
+	}
+	for _, id := range want {
+		if !seen[id] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func contains(items []struct {
 	ID        string    `json:"id"`
 	AuthorID  string    `json:"author_id"`

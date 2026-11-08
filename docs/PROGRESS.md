@@ -12,7 +12,7 @@
 | Test | Terverifikasi | `go build ./...`, `go vet ./...`, dan `make test` lulus; semua test yang dijalankan PASS. |
 | Docker Compose app | Terverifikasi | `Dockerfile` ada; `docker-compose.yml` memiliki `app`; `docker compose --env-file /dev/null config` valid. |
 | Clone bersih | Terverifikasi | Clone sementara tanpa `.env` berhasil dibangun dan dijalankan terisolasi sebagai project `articleclone` pada port 5440/18081. GET list dan filter `author=budi` memberi 200; POST author `201` memberi 201 dan author tidak ada memberi 422; `go build ./...` lulus. |
-| Evidence | Terverifikasi | `docs/evidence.md` ada, berisi EXPLAIN list dan raw output. |
+| Evidence | Terverifikasi | `docs/evidence.md` berisi EXPLAIN list, resolusi nama kembar, pemeriksaan prepared statement, dan hasil I7. |
 | Load test | Tidak ada bukti | Pencarian `k6`, `vegeta`, `hey`, `load test`, dan `stress` di repo tidak menghasilkan skrip atau hasil. |
 | README | Terverifikasi | `README.md` ada dan memuat struktur folder, cara menjalankan layanan/test, data simulasi, dan tautan dokumentasi. |
 | Disclosure AI | Terverifikasi | `docs/ai-usage.md` ada, tetapi tabel bantuan AI dan bagian kegagalan AI masih berupa placeholder. |
@@ -31,10 +31,10 @@
 |---|---|---|
 | `docs/evidence.md` ada | Ya | `docs/evidence.md`, `# Bukti EXPLAIN ListArticles`; mencakup SQL, matriks enam kasus, generic-plan check, dan raw output. |
 | EXPLAIN list tanpa filter, author giant, author kecil | Ya | `## Pengukuran awal (dengan cursor)` dan `## Raw output`: tanpa filter, `author-giant`, `author-000100`. |
-| EXPLAIN nama kembar | Tidak | Tidak ada EXPLAIN untuk `Syndication` atau `Budi Santoso` yang memetakan ke beberapa ID. |
-| EXPLAIN resolusi nama ke `authors.name_normalized` | Tidak | Tidak ada EXPLAIN query `authors`/`name_normalized`. |
+| EXPLAIN nama kembar | Ya | `docs/evidence.md`, `## Nama kembar dan resolusi nama`; mencakup `Syndication` dan `Budi Santoso`. |
+| EXPLAIN resolusi nama ke `authors.name_normalized` | Ya | `docs/evidence.md`, `## Nama kembar dan resolusi nama`; memakai `idx_authors_name_norm`. |
 | EXPLAIN cursor di tengah data | Ya | `docs/evidence.md`, `## Pengukuran awal (dengan cursor)` memakai predikat keyset `(created_at, id) < (...)`. |
-| Test dokumen Indonesia, Inggris, dan campuran | Tidak | `*_test.go` hanya memeriksa pencarian `banjir`/`macet`; tidak ada tiga kategori bahasa tersebut. |
+| Test dokumen Indonesia, Inggris, dan campuran | Ya | `internal/postgres/integration_test.go`, `TestIntegrationI7MixedLanguageSearch`; seluruh query di-scope ke author khusus. |
 | Skrip atau hasil load test | Tidak | Pencarian repo untuk `k6`, `vegeta`, `hey`, `load test`, dan `stress` tidak menemukan bukti. |
 | Cache di kode | Tidak | Pencarian `cache`/`singleflight` pada `*.go` tidak menemukan implementasi; hanya folder `internal/cache` kosong. |
 | Penjelasan extensibility categories/comments | Tidak | `docs/decisions.md` kosong dan README tidak menjelaskan penambahan categories atau comments. |
@@ -46,6 +46,13 @@
 - Setelah uji clone, `docker compose ps` di repo asli menunjukkan `article-db` tetap healthy, dan `SELECT count(*) FROM articles` menghasilkan `1000000`.
 - `make test` hanya menjalankan `DROP DATABASE IF EXISTS articles_test WITH (FORCE)`,
   `CREATE DATABASE articles_test`, migrasi up ke `articles_test`, lalu test.
-- Test PASS: `TestCursorRoundTripAndInvalidValues`, `TestCreateValidation`,
-  `TestListLimitValidation`, dan integrasi `I1` sampai `I6`. Package `cmd/api`
+- Test PASS langkah 3 (8 November 2026): `make test` membuat ulang
+  `articles_test`, lalu `TestIntegrationI1KeysetNoDuplicateOrMissing` sampai
+  `TestIntegrationI7MixedLanguageSearch` semuanya PASS tanpa SKIP. I7
+  memverifikasi dokumen Indonesia, Inggris, dan campuran termasuk batas tanpa
+  stemming serta query tiga spasi. Package `cmd/api`
   dan `cmd/seed` tidak memiliki test.
+- EXPLAIN langkah 3 pada database `articles` hanya memakai `SELECT`, `EXPLAIN`,
+  `PREPARE`, `DEALLOCATE`, serta `SET`/`RESET plan_cache_mode`; jumlah artikel
+  sebelum pengukuran adalah `1000000`. Dua kasus `Syndication` melebihi 300 ms
+  dan telah dicatat apa adanya di `docs/evidence.md`.

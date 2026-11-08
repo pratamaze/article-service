@@ -82,6 +82,39 @@ Kasus 4 menghasilkan 0 baris pada kedua eksekusi dan memakai dua bitmap index
 scan. Lima kasus lain memakai `idx_articles_created` atau
 `idx_articles_author_created`; tidak ada `Seq Scan` pada enam plan ini.
 
+## Nama kembar dan resolusi nama
+
+Pengukuran berikut memakai SQL `ResolveAuthorIDs` dan `ListArticles` halaman
+pertama dengan literal serta `LIMIT 21`, lalu menjalankan setiap statement dua
+kali. Untuk resolusi nama, setiap pasangan angka pada sel menyatakan
+`syndication` lalu `budi santoso`.
+
+| Kasus | Node utama | Index | Jumlah baris | Waktu pertama (ms) | Waktu kedua (ms) |
+|---|---|---|---:|---:|---:|
+| Resolusi nama `syndication` / `budi santoso` | Sort → Index Scan | `idx_authors_name_norm` | 2 / 3 | 0.085 / 0.021 | 0.028 / 0.015 |
+| `Syndication` (giant + kecil), tanpa query | Index Scan | `idx_articles_created` | 21 | 3280.261 | 534.102 |
+| `Syndication` (giant + kecil), query `kebijakan` | Index Scan | `idx_articles_created` | 21 | 865.649 | 506.931 |
+| `Budi Santoso` (3 author kecil), tanpa query | Sort → Index Scan | `idx_articles_author_created` | 21 | 1.960 | 0.239 |
+| `author-giant`, cursor baris ke-10000 | Index Scan | `idx_articles_author_created` | 21 | 0.339 | 0.062 |
+
+Resolusi `syndication` mengembalikan `author-000001` dan `author-giant`,
+sedangkan `budi santoso` mengembalikan `author-000002`, `author-000003`, dan
+`author-000004`. Kedua resolusi memakai `idx_authors_name_norm`. Pada dua list
+`Syndication`, `idx_articles_created` menyaring 434464 dan 701443 baris.
+
+### Pemeriksaan prepared statement kasus `Syndication` tanpa query
+
+Statement dengan parameter array author dijalankan tujuh kali dengan nilai
+`['author-000001','author-giant']`; kolom waktu adalah `Execution Time`.
+
+| Pengaturan | Eksekusi 1: node utama | Waktu 1 (ms) | Eksekusi 7: node utama | Waktu 7 (ms) |
+|---|---|---:|---|---:|
+| `force_custom_plan` | Index Scan `idx_articles_created` | 282.466 | Index Scan `idx_articles_created` | 263.624 |
+| tanpa pengaturan (`RESET plan_cache_mode`) | Index Scan `idx_articles_created` | 262.786 | Index Scan `idx_articles_created` | 252.015 |
+
+Dalam pengukuran ini, node utama pada eksekusi pertama dan ketujuh sama pada
+kedua pengaturan.
+
 ## Generic plan (opsional)
 
 Untuk statement kasus 3 yang diprepare dengan parameter `$1` untuk author,
@@ -110,6 +143,12 @@ ke-7 (2.223 ms) sama-sama memakai `Index Scan using idx_articles_created`.
 
 Tidak ada `Seq Scan`, node `Sort` dengan lebih dari 10.000 baris, atau
 `Execution Time` di atas 300 ms pada enam kasus matriks halaman pertama.
+
+Pengukuran nama kembar menambahkan dua kasus di atas 300 ms: `Syndication`
+tanpa query sebesar 3280.261 ms lalu 534.102 ms, serta `Syndication` dengan
+`kebijakan` sebesar 865.649 ms lalu 506.931 ms. Keduanya memakai `Index Scan
+idx_articles_created`; tidak ada `Seq Scan`. Sort untuk tiga author `Budi
+Santoso` menerima 83 baris sebelum `LIMIT`, bukan lebih dari 10.000 baris.
 
 Pengukuran prepared statement di atas berubah plan pada eksekusi ke-6 dan
 ke-7. Karena itu API mengatur `plan_cache_mode=force_custom_plan`; kesimpulan
@@ -318,7 +357,32 @@ TODO: bukti belum dibuat.
 
 ## 3. Search & Filtering
 
-TODO: bukti belum dibuat.
+Kecepatan pencarian sudah terlihat pada pengukuran EXPLAIN: kombinasi
+`author-giant` dan `kebijakan` pada matriks awal memakai `Index Scan
+idx_articles_created` dan selesai dalam 2.519 ms lalu 2.644 ms; pada nama
+`Syndication` kombinasi yang sama selesai dalam 865.649 ms lalu 506.931 ms.
+
+Akurasi berikut diverifikasi oleh `TestIntegrationI7MixedLanguageSearch` pada
+`make test`. Tiga artikel ID, EN, dan campuran memakai satu `author_id` khusus,
+sehingga setiap query hanya menguji tiga artikel tersebut.
+
+| Query | Hasil yang ditemukan |
+|---|---|
+| `banjir` | ID |
+| `flood` | EN |
+| `startup` | Campuran |
+| `program` | ID, EN, Campuran |
+| `jakarta`, `JAKARTA` | ID, EN |
+| `meluncurkan` | ID, Campuran |
+| `minister` | Campuran |
+| `banjir jakarta` | ID |
+| `meluncur`, `launch`, `flooded` | Tidak ada |
+| tiga spasi | ID, EN, Campuran |
+
+Konfigurasi `simple` tidak melakukan stemming: `meluncur` tidak cocok dengan
+`meluncurkan`, `launch` tidak cocok dengan `launches`, dan `flooded` tidak
+cocok dengan `flood` atau `flooding`. Ini adalah trade-off yang disengaja dan
+dibuktikan oleh I7, bukan kegagalan test.
 
 ## 4. Extensibility & Maintainability
 
