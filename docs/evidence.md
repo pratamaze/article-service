@@ -3,7 +3,7 @@
 Verifikasi dilakukan pada 8 November 2026 dengan `make psql`, menggunakan
 `EXPLAIN (ANALYZE, BUFFERS)`. Keempat statement di bawah memakai bentuk SQL
 yang sama dengan statement yang dirakit `Repository.ListArticles`: kolom,
-filter, keyset cursor, urutan, dan `LIMIT`. Statement diprepare agar placeholder
+filter, keyset cursor, urutan, dan `LIMIT`. Statement diprepare agar parameter
 `$n` tetap sama seperti pada aplikasi. Nilai limit yang dieksekusi adalah 21
 (limit klien 20 ditambah satu untuk `has_more`). Tidak ada perubahan data dan
 tidak menggunakan `SET enable_seqscan = off`.
@@ -46,7 +46,7 @@ Distribusi per bulan yang benar-benar ada pada hasil query adalah berikut. Nilai
 | 2026-10 | 86786 | 0 |
 | 2026-11 | 18915 | 0 |
 
-Pemeriksaan `git diff b0763ae 923e1ba -M --stat -- cmd/seed scripts/seed` menunjukkan perpindahan `scripts/seed/main.go` ke `cmd/seed/main.go` tanpa perubahan baris. Kode seed membuat `created_at` menaik dari waktu mulai hingga rentang 250 hari, dengan jitter dan 5% kemungkinan memakai waktu baris sebelumnya. Untuk setiap artikel, `author-giant` dipilih secara acak independen dengan peluang 30%; selain itu salah satu author ekor dipilih acak.
+Pemeriksaan `git diff b0763ae 923e1ba -M --stat -- cmd/seed` menunjukkan perpindahan implementasi seed ke `cmd/seed/main.go` tanpa perubahan baris. Kode seed membuat `created_at` menaik dari waktu mulai hingga rentang 250 hari, dengan jitter dan 5% kemungkinan memakai waktu baris sebelumnya. Untuk setiap artikel, `author-giant` dipilih secara acak independen dengan peluang 30%; selain itu salah satu author ekor dipilih acak.
 
 Seed dijalankan hanya pada `articles_test` yang dibuat ulang melalui `make test-db`, dengan `DATABASE_URL` database tersebut dan `go run ./cmd/seed -n 20000 -seed 42` (tanpa `-reset`). Hasilnya 20.000 artikel dan distribusi giant berikut; bucket 11 kembali hanya baris batas atas.
 
@@ -66,7 +66,7 @@ Seed dijalankan hanya pada `articles_test` yang dibuat ulang melalui `make test-
 
 Jadi, seed saat ini menghasilkan `author-giant` yang tersebar sepanjang waktu (pada seed ini ada di bucket 1--10), sedangkan data `articles` saat ini terkonsentrasi pada waktu paling lama (bucket 1--2). Kapan atau mengapa bentuk data `articles` berubah: **TIDAK DIKETAHUI**.
 
-## Matriks ukur pada data saat ini
+## Matriks ukur pada data setelah pergeseran giant
 
 SQL setiap kasus persis cabang halaman pertama `Repository.ListArticles`: `SELECT id, author_id, title, left(body, 200), created_at FROM articles`, filter yang sesuai, `ORDER BY created_at DESC, id DESC`, dan `LIMIT 21`. Setiap literal dijalankan dua kali memakai `EXPLAIN (ANALYZE, BUFFERS)`.
 
@@ -81,7 +81,7 @@ SQL setiap kasus persis cabang halaman pertama `Repository.ListArticles`: `SELEC
 | tanpa author, `berita` | Index Scan | `idx_articles_created` | 21 | 0.122 | 0.052 |
 | tanpa author, tanpa query | Index Scan | `idx_articles_created` | 21 | 0.041 | 0.036 |
 
-### Prepared statement kasus `author-giant` + `kebijakan` pada data saat ini
+### Prepared statement kasus `author-giant` + `kebijakan` setelah pergeseran giant
 
 Statement berparameter untuk kasus kedua dijalankan tujuh kali tanpa pengaturan khusus (`RESET plan_cache_mode`), kemudian tujuh kali lagi dengan `SET plan_cache_mode = force_custom_plan`. Kedua bentuk memakai `LIMIT 21`.
 
@@ -92,9 +92,11 @@ Statement berparameter untuk kasus kedua dijalankan tujuh kali tanpa pengaturan 
 
 Pada default, estimate pada node `Index Scan` berubah dari 3496 baris pada eksekusi 1 menjadi 1 baris pada eksekusi 6 dan 7; node dan index tidak berubah. Dengan `force_custom_plan`, estimate tetap 3496 pada eksekusi 1--7. Tidak ada `Seq Scan` maupun waktu di atas 300 ms dalam delapan kasus dan pemeriksaan ini.
 
-## Arsip pengukuran pada distribusi data sebelumnya
+## Arsip pengukuran sebelum pergeseran giant
 
-Seluruh tabel dan raw output setelah heading ini diukur pada distribusi data sebelumnya; **tidak berlaku untuk data saat ini**. Angka dipertahankan sebagai arsip dan tidak dipakai sebagai pembanding dengan matriks aktual di atas.
+Seluruh tabel dan raw output setelah heading ini diukur sebelum pergeseran giant;
+**tidak berlaku untuk data setelah pergeseran giant**. Angka dipertahankan sebagai
+arsip dan tidak dipakai sebagai pembanding dengan matriks aktual di atas.
 
 ## Pengukuran awal (dengan cursor)
 
@@ -151,7 +153,7 @@ diterapkan pada heap scan, lalu hasil diurutkan. Hasilnya 4 baris, 0.088 ms,
 dan 14 shared-buffer hits. Untuk kombinasi ini PostgreSQL memilih index
 full-text, bukan `idx_articles_author_created`, berdasarkan parameter aktual.
 
-## Matriks ukur lama (halaman pertama; distribusi data sebelumnya)
+## Matriks ukur lama (halaman pertama; sebelum pergeseran giant)
 
 Setiap statement memakai SQL `ListArticles` halaman pertama dengan nilai literal
 dan `LIMIT 21`. Waktu dingin adalah eksekusi pertama dan waktu hangat adalah
@@ -170,7 +172,7 @@ Kasus 4 menghasilkan 0 baris pada kedua eksekusi dan memakai dua bitmap index
 scan. Lima kasus lain memakai `idx_articles_created` atau
 `idx_articles_author_created`; tidak ada `Seq Scan` pada enam plan ini.
 
-## Nama kembar dan resolusi nama — sebelum perbaikan
+## Nama kembar dan resolusi nama - sebelum perbaikan
 
 Pengukuran berikut memakai SQL `ResolveAuthorIDs` dan `ListArticles` halaman
 pertama dengan literal serta `LIMIT 21`, lalu menjalankan setiap statement dua
@@ -255,14 +257,14 @@ Filter: 300441`, 0 hasil, dan 251.753 ms. Pada LATERAL dua author sekaligus,
 node tersebut ber-loop dua kali dan EXPLAIN melaporkan rata-rata 150238 baris
 terbuang per loop. Ini adalah hasil pengukuran, bukan perubahan kode.
 
-## Generic plan lama (opsional; distribusi data sebelumnya)
+## Generic plan lama (opsional; sebelum pergeseran giant)
 
 Untuk statement kasus 3 yang diprepare dengan parameter `$1` untuk author,
 node utama eksekusi ke-1 adalah `Index Scan using idx_articles_created`.
 Pada eksekusi ke-7 node utama berubah menjadi `Sort` di atas `Bitmap Heap Scan`
 dengan `BitmapAnd`; karena itu node utama berubah.
 
-## Temuan arsip (distribusi data sebelumnya)
+## Temuan arsip (sebelum pergeseran giant)
 
 ### Pengukuran API tambahan (8 November 2026)
 
@@ -299,7 +301,7 @@ ini hanya berlaku untuk data, statistik, dan parameter yang diukur.
 `EXPLAIN` hanya membuktikan plan pada data, statistik, dan parameter saat
 dijalankan. Angka waktu dan buffer di atas bukan jaminan performa tetap.
 
-## Raw output arsip (distribusi data sebelumnya)
+## Raw output arsip (sebelum pergeseran giant)
 
 ````text
 # Output mentah EXPLAIN halaman pertama
@@ -546,7 +548,4 @@ dibuktikan oleh I7, bukan kegagalan test.
 - `internal/httpapi` menangani HTTP dan meneruskan input ke `internal/article`.
 - `internal/article` memuat service, tipe domain, validasi, dan aturan bisnis.
 - `internal/postgres` mengimplementasikan repository PostgreSQL untuk service.
-- Skema saat ini memisahkan `authors` dan `articles`, dengan FK `articles.author_id` ke `authors(id)`.
-- Categories atau comments dapat ditambah lewat migrasi bernomor baru dan paket baru di `internal/`.
-- Tabel fitur baru seharusnya memakai FK ke `articles(id)` tanpa mengubah kode artikel yang ada.
-- Aturan bisnis fitur tersebut diletakkan pada service paket domainnya; handler dan repository menjadi batas HTTP dan penyimpanan.
+- Skema memisahkan `authors` dan `articles`, dengan FK `articles.author_id` ke `authors(id)`.

@@ -1,5 +1,7 @@
 .env
-AGENTS.md
+.aws/
+.codex/
+.agents/
 bin/
 out/
 seed
