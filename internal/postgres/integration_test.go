@@ -328,6 +328,92 @@ func TestIntegrationI7MixedLanguageSearch(t *testing.T) {
 	}
 }
 
+func TestIntegrationI8MultiAuthorOrdering(t *testing.T) {
+	e := newIntegrationEnv(t)
+	name := "Multi Author " + testID()
+	authorIDs := []string{e.author(t, name), e.author(t, name), e.author(t, name)}
+	tiedAt := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	for authorIndex, authorID := range authorIDs {
+		for articleIndex := 0; articleIndex < 9; articleIndex++ {
+			title := fmt.Sprintf("article %d-%d", authorIndex, articleIndex)
+			if articleIndex < 6 {
+				title += " kebijakan"
+			}
+			id, _ := e.article(t, authorID, title, "body")
+			if _, err := e.pool.Exec(context.Background(), "UPDATE articles SET created_at = $2 WHERE id = $1", id, tiedAt); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	for _, query := range []string{"", "kebijakan"} {
+		want := expectedMultiAuthorIDs(t, e, authorIDs, query)
+		got := pagedMultiAuthorIDs(t, e, name, query)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("query %q got %v, want %v", query, got, want)
+		}
+		seen := make(map[string]bool, len(got))
+		for _, id := range got {
+			if seen[id] {
+				t.Fatalf("query %q duplicated id %s", query, id)
+			}
+			seen[id] = true
+		}
+	}
+}
+
+func expectedMultiAuthorIDs(t *testing.T, e integrationEnv, authorIDs []string, query string) []string {
+	t.Helper()
+	statement := "SELECT id FROM articles WHERE author_id = ANY($1::text[])"
+	args := []any{authorIDs}
+	if query != "" {
+		statement += " AND search_vector @@ websearch_to_tsquery('simple', $2)"
+		args = append(args, query)
+	}
+	statement += " ORDER BY created_at DESC, id DESC"
+	rows, err := e.pool.Query(context.Background(), statement, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var want []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return want
+}
+
+func pagedMultiAuthorIDs(t *testing.T, e integrationEnv, name, query string) []string {
+	t.Helper()
+	var got []string
+	cursor := ""
+	for {
+		path := "?author=" + url.QueryEscape(name) + "&limit=5"
+		if query != "" {
+			path += "&query=" + url.QueryEscape(query)
+		}
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		page := e.get(t, path)
+		got = append(got, ids(page.Items)...)
+		if !page.More {
+			return got
+		}
+		cursor = page.Next
+		if cursor == "" {
+			t.Fatal("has_more without next_cursor")
+		}
+	}
+}
+
 func assertExactIDs(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

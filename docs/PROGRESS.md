@@ -1,5 +1,20 @@
 # Progress assessment
 
+## Langkah 3b — multi-author Syndication (8 November 2026)
+
+| Item | Status | Bukti |
+|---|---|---|
+| Diagnosa Syndication | Terverifikasi | `syndication` mengembalikan `author-000001` (35 artikel) dan `author-giant` (300441 artikel); giant memang ada dalam daftar. |
+| Keputusan LATERAL | Diterapkan | Alternatif hangat 0.126 ms tanpa query dan 1.485 ms dengan `kebijakan`, keduanya di bawah 50 ms dan lebih cepat dari `ANY`. |
+| Perbaikan repository | Terverifikasi | Lebih dari satu author memakai `unnest($1::text[])` dan LATERAL per-author, dengan query, cursor, urutan, dan `limit+1` di dalam serta di luar. Jalur satu author tidak berubah. |
+| Urutan dan pagination | Terverifikasi | `TestIntegrationI8MultiAuthorOrdering` membandingkan seluruh halaman limit 5 dari tiga author bernama sama, termasuk query, dengan `ANY(...) ORDER BY created_at DESC, id DESC`. |
+| Test | Terverifikasi | `make test` PASS untuk I1–I8; `go test ./... -count=1 -race` PASS terhadap `articles_test`. |
+| Sisa kasus lambat | Terverifikasi | `Syndication` + `hidrokarbon` 3156.963/233.154 ms dan `zzxqv` 203.670/197.478 ms tetap lambat; fakta dan plan dicatat di `docs/evidence.md`. |
+
+`articles` berjumlah 1000000 sebelum diagnosa dan 1000000 sesudah test. Tidak
+ada perintah tulis terhadap database tersebut pada langkah ini; database yang
+ditulis oleh test hanya `articles_test`.
+
 ## Audit pasca rombak — 8 November 2026
 
 | Item | Status | Bukti |

@@ -82,7 +82,7 @@ Kasus 4 menghasilkan 0 baris pada kedua eksekusi dan memakai dua bitmap index
 scan. Lima kasus lain memakai `idx_articles_created` atau
 `idx_articles_author_created`; tidak ada `Seq Scan` pada enam plan ini.
 
-## Nama kembar dan resolusi nama
+## Nama kembar dan resolusi nama — sebelum perbaikan
 
 Pengukuran berikut memakai SQL `ResolveAuthorIDs` dan `ListArticles` halaman
 pertama dengan literal serta `LIMIT 21`, lalu menjalankan setiap statement dua
@@ -114,6 +114,44 @@ Statement dengan parameter array author dijalankan tujuh kali dengan nilai
 
 Dalam pengukuran ini, node utama pada eksekusi pertama dan ketujuh sama pada
 kedua pengaturan.
+
+### Diagnosa dan sesudah perbaikan (langkah 3b)
+
+Pada pemeriksaan ulang 8 November 2026, resolusi `syndication` mengembalikan
+`author-000001` (35 artikel) dan `author-giant` (300441 artikel). Jadi
+`author-giant` memang termasuk dalam daftar id; tidak ada koreksi terhadap
+temuan sebelumnya.
+
+Sebelum kode diubah, SQL repository `author_id = ANY($1::text[])`, halaman
+pertama, dan `LIMIT 21` memakai `Index Scan` pada `idx_articles_created`.
+Estimate scan adalah 323783 baris, aktual hasil akhir 21 baris, dan 434464
+baris dibuang oleh filter. Waktu dua eksekusi adalah 1523.932 ms dan 250.481
+ms. Alternatif LATERAL diuji terlebih dahulu tanpa mengubah kode: ia memakai
+`idx_articles_author_created` untuk dua scan per-author, lalu sort 42 baris.
+Waktunya 6.263 ms dan 0.126 ms tanpa query; dengan `kebijakan`, 18.595 ms dan
+1.485 ms (960 baris dibuang oleh filter). Karena waktu hangat kedua alternatif
+di bawah 50 ms dan lebih cepat daripada bentuk lama, bentuk LATERAL diterapkan
+hanya untuk lebih dari satu author id.
+
+SQL baru membatasi setiap author sampai `limit+1` di subquery LATERAL, lalu
+menggabungkan dan membatasi lagi dengan urutan `created_at DESC, id DESC`.
+Query, cursor, dan semua id tetap menjadi parameter. Pengukuran berikut
+memakai prepared statement dengan `force_custom_plan`, `LIMIT 21`, dan dua
+eksekusi pada SQL yang dirakit repository.
+
+| Kasus | Node utama dan index | Baris | Eksekusi 1 (ms) | Eksekusi 2 (ms) |
+|---|---|---:|---:|---:|
+| `Syndication`, tanpa query | Sort → per-author Limit → Index Scan; `idx_articles_author_created` | 21 | 0.364 | 0.187 |
+| `Syndication`, `kebijakan` | Sort → per-author Limit → Index Scan; `idx_articles_author_created` | 21 | 1.854 | 1.739 |
+| `Syndication`, `hidrokarbon` | Sort → per-author Limit → Index Scan; `idx_articles_author_created` | 4 | 3156.963 | 233.154 |
+| `Syndication`, `zzxqv` | Sort → per-author Limit → Index Scan; `idx_articles_author_created` | 0 | 203.670 | 197.478 |
+| `Budi Santoso`, tanpa query | Sort → per-author Limit → Index Scan; `idx_articles_author_created` | 21 | 8.564 | 0.143 |
+
+Kasus `hidrokarbon` dan `zzxqv` masih lambat: masing-masing scan per-author
+membuang 150236 dan 150238 baris untuk mencari hasil langka atau tidak ada.
+Kasus Budi hangat 0.143 ms, tidak lebih buruk dari angka sebelum perbaikan
+0.239 ms. Pengukuran API lokal untuk `GET /articles?author=Syndication&limit=20`
+memberi HTTP 200 dalam 15.399 ms lalu 1.113 ms.
 
 ## Generic plan (opsional)
 

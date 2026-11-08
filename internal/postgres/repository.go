@@ -81,32 +81,27 @@ func (r *Repository) ListArticles(ctx context.Context, params article.ListParams
 	if params.Limit < 1 {
 		return nil, false, errors.New("list limit must be positive")
 	}
+	if len(params.AuthorIDs) > 1 {
+		return r.listArticlesForMultipleAuthors(ctx, params, queryText)
+	}
 
 	const selectClause = `SELECT id, author_id, title, left(body, 200), created_at FROM articles`
 	const orderLimit = ` ORDER BY created_at DESC, id DESC LIMIT $%d`
 	const authorWhere = ` WHERE author_id = $%d`
-	const authorsWhere = ` WHERE author_id = ANY($%d::text[])`
 	const searchWhere = ` WHERE search_vector @@ websearch_to_tsquery('simple', $%d)`
 	const authorSearchWhere = ` WHERE author_id = $%d AND search_vector @@ websearch_to_tsquery('simple', $%d)`
-	const authorsSearchWhere = ` WHERE author_id = ANY($%d::text[]) AND search_vector @@ websearch_to_tsquery('simple', $%d)`
 
 	args := make([]any, 0, 4)
 	where := ""
 	if len(params.AuthorIDs) == 1 && queryText == "" {
 		args = append(args, params.AuthorIDs[0])
 		where = format(authorWhere, len(args))
-	} else if len(params.AuthorIDs) > 1 && queryText == "" {
-		args = append(args, params.AuthorIDs)
-		where = format(authorsWhere, len(args))
 	} else if len(params.AuthorIDs) == 0 && queryText != "" {
 		args = append(args, queryText)
 		where = format(searchWhere, len(args))
 	} else if len(params.AuthorIDs) == 1 {
 		args = append(args, params.AuthorIDs[0], queryText)
 		where = format(authorSearchWhere, 1, 2)
-	} else if len(params.AuthorIDs) > 1 {
-		args = append(args, params.AuthorIDs, queryText)
-		where = format(authorsSearchWhere, 1, 2)
 	}
 
 	if params.Cursor != nil {
@@ -119,6 +114,58 @@ func (r *Repository) ListArticles(ctx context.Context, params article.ListParams
 	}
 	args = append(args, params.Limit+1)
 	query := selectClause + where + format(orderLimit, len(args))
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	items := make([]article.Article, 0, params.Limit+1)
+	for rows.Next() {
+		var item article.Article
+		if err := rows.Scan(&item.ID, &item.AuthorID, &item.Title, &item.Excerpt, &item.CreatedAt); err != nil {
+			return nil, false, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(items) > params.Limit
+	if hasMore {
+		items = items[:params.Limit]
+	}
+	return items, hasMore, nil
+}
+
+// listArticlesForMultipleAuthors takes the first limit+1 rows per author before
+// merging them. This avoids scanning idx_articles_created for duplicate author
+// names that include a very large author; see docs/evidence.md.
+func (r *Repository) listArticlesForMultipleAuthors(ctx context.Context, params article.ListParams, queryText string) ([]article.Article, bool, error) {
+	args := []any{params.AuthorIDs}
+	where := " WHERE author_id = a.id"
+	if queryText != "" {
+		args = append(args, queryText)
+		where += format(" AND search_vector @@ websearch_to_tsquery('simple', $%d)", len(args))
+	}
+	if params.Cursor != nil {
+		args = append(args, params.Cursor.CreatedAt, params.Cursor.ID)
+		where += format(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+	}
+	args = append(args, params.Limit+1)
+	limit := len(args)
+	query := fmt.Sprintf(`
+SELECT x.id, x.author_id, x.title, x.excerpt, x.created_at
+FROM unnest($1::text[]) AS a(id)
+CROSS JOIN LATERAL (
+	SELECT id, author_id, title, left(body, 200) AS excerpt, created_at
+	FROM articles%s
+	ORDER BY created_at DESC, id DESC
+	LIMIT $%d
+) AS x
+ORDER BY x.created_at DESC, x.id DESC
+LIMIT $%d`, where, limit, limit)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
