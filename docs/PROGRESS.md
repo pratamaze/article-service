@@ -5,7 +5,7 @@
 | Skema dan migrasi | Terverifikasi | `migrations/0001_create_tables.up.sql` dan `0002_create_indexes.up.sql` dibaca. |
 | Data uji | Terverifikasi | Query baca pada 8 November 2026 menghasilkan 23.334 author dan 1.000.000 artikel. |
 | Repository SQL | Selesai | `internal/article/article.go` dan `internal/postgres/repository.go` dibuat; `GOCACHE=/tmp/article-service-go-build go test ./...` lulus. |
-| Bukti EXPLAIN (6 kasus) | Selesai | `docs/explain.md` dan `docs/explain-raw.md`; 6 kasus halaman pertama masing-masing diukur dua kali dengan `EXPLAIN (ANALYZE, BUFFERS)` melalui `make psql`. |
+| Bukti EXPLAIN (6 kasus) | Selesai | `docs/evidence.md`; 6 kasus halaman pertama masing-masing diukur dua kali dengan `EXPLAIN (ANALYZE, BUFFERS)` melalui `make psql`. |
 | API POST | Selesai | `POST /articles`: batas body 1 MB, validasi rune, ULID server, dan pemetaan 400/422. Diverifikasi dengan curl pada 8 November 2026. |
 | API GET | Selesai | `GET /articles`: keyset cursor base64 URL-safe mikrodetik, limit 1--100, author/name search, dan error 400. Diverifikasi dengan curl pada 8 November 2026. |
 | Pengaman dasar | Selesai | Timeout per request, `ReadHeaderTimeout`, `statement_timeout=3000`, logging error internal, dan custom plan. |
@@ -93,3 +93,11 @@
 ## Langkah berikutnya
 
 TIDAK DIKETAHUI.
+
+## Langkah 5 (struktur folder)
+
+- Program seed dipindahkan dari `scripts/seed` ke `cmd/seed`; referensi Makefile
+  diperbarui.
+- Bukti EXPLAIN digabungkan ke `docs/evidence.md`; file sumber lama dihapus
+  setelah isinya dipertahankan.
+- Tidak ada perintah database yang dijalankan pada langkah ini.

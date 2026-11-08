@@ -1,5 +1,9 @@
 .env
+AGENTS.md
 bin/
+out/
+seed
+*.log
 *.out
 *.test
 .DS_Store

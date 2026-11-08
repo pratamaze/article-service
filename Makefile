@@ -55,7 +55,7 @@ sanity:
 
 seed:
 	$(MAKE) indexes-down
-	go run ./scripts/seed -n $(N) -reset
+	go run ./cmd/seed -n $(N) -reset
 	$(MAKE) indexes-up
 	$(PSQL) -c "VACUUM (ANALYZE) authors" -c "VACUUM (ANALYZE) articles"
 
